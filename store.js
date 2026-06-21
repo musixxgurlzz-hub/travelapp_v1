@@ -29,7 +29,36 @@ const Store = (() => {
   function writeTrips(trips) {
     _cache = trips;
     localStorage.setItem(TRIPS_KEY, JSON.stringify(trips));
+    try { window.dispatchEvent(new Event('mytrips:changed')); } catch {}
     return trips;
+  }
+
+  // ---- sync serialization ----
+  // All app state lives in localStorage under these prefixes. Device-local
+  // keys (the sync space id and sync bookkeeping) are excluded so they never
+  // travel between paired devices.
+  const SYNC_PREFIXES = ['mytrips:', 'trip:'];
+  const isSyncable = (k) => SYNC_PREFIXES.some((p) => k.startsWith(p))
+    && k !== 'mytrips:space' && !k.startsWith('mytrips:sync:');
+
+  function serialize() {
+    const data = {};
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (isSyncable(k)) data[k] = localStorage.getItem(k);
+    }
+    return data;
+  }
+  function hydrate(data) {
+    if (!data || typeof data !== 'object') return;
+    const remove = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (isSyncable(k)) remove.push(k);
+    }
+    remove.forEach((k) => localStorage.removeItem(k));
+    Object.entries(data).forEach(([k, v]) => { if (typeof v === 'string') localStorage.setItem(k, v); });
+    _cache = null; // force reload from the newly hydrated data
   }
 
   // Seed on first run; otherwise refresh unedited seed trips when data.js is newer.
@@ -211,5 +240,6 @@ const Store = (() => {
     getTrips, getTrip, getCurrentId, setCurrentId,
     saveTrip, updateTrip, completeTrip, reopenTrip, removeTrip,
     exportTrip, normalizeImport, addTrip, countCheckable, slug,
+    serialize, hydrate,
   };
 })();

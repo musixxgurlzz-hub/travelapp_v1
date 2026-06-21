@@ -2,7 +2,11 @@
   const APP_NAME = 'My Trips';
 
   // ---- transient UI state (not persisted) ----
-  const ui = { editing: false, donePanel: false, addPanel: false, addError: '' };
+  const ui = { editing: false, donePanel: false, addPanel: false, addError: '', syncPanel: false, copied: false };
+
+  const SYNC_LABELS = { idle: 'Connecting…', syncing: 'Syncing…', synced: 'Synced ✓', offline: 'Offline — saved on this device', error: 'Sync unavailable — saved on this device', disabled: 'Saved on this device' };
+  const syncStatus = () => (window.Sync ? window.Sync.status() : 'disabled');
+  const syncFooterText = () => `${SYNC_LABELS[syncStatus()] || 'Saved on this device'} · works offline`;
 
   // ---- per-trip ephemeral state (checked items, open accordions) ----
   const tripKey = (tripId, kind) => `trip:${tripId}:${kind}`;
@@ -10,7 +14,8 @@
     try { return new Set(JSON.parse(localStorage.getItem(key) || '[]')); }
     catch { return new Set(); }
   };
-  const saveSet = (key, set) => localStorage.setItem(key, JSON.stringify([...set]));
+  const markChanged = () => { try { window.dispatchEvent(new Event('mytrips:changed')); } catch {} };
+  const saveSet = (key, set) => { localStorage.setItem(key, JSON.stringify([...set])); markChanged(); };
 
   const root = document.getElementById('app');
   const isOnline = () => navigator.onLine;
@@ -64,7 +69,7 @@
   const hasSpend = (str) => parseYen(str) > 0 || /budget|as needed/i.test(str || '');
 
   const loadActuals = (key) => { try { return JSON.parse(localStorage.getItem(key) || '{}') || {}; } catch { return {}; } };
-  const saveActuals = (key, map) => localStorage.setItem(key, JSON.stringify(map));
+  const saveActuals = (key, map) => { localStorage.setItem(key, JSON.stringify(map)); markChanged(); };
   const dayEst = (day) => (day.items || []).reduce((s, i) => s + parseYen(i.price), 0);
   const yen = (n) => '¥' + Number(n || 0).toLocaleString();
 
@@ -84,6 +89,10 @@
     const addBtn = el('button', { class: 'tool-btn', type: 'button' }, '＋ Add trip');
     addBtn.addEventListener('click', () => { ui.addPanel = !ui.addPanel; ui.addError = ''; render(); });
     row.appendChild(addBtn);
+
+    const syncBtn = el('button', { class: `tool-btn${ui.syncPanel ? ' active' : ''}`, type: 'button' }, '🔗 Sync');
+    syncBtn.addEventListener('click', () => { ui.syncPanel = !ui.syncPanel; ui.copied = false; render(); });
+    row.appendChild(syncBtn);
 
     if (trip) {
       const editBtn = el('button', {
@@ -107,6 +116,34 @@
       row.appendChild(exportBtn);
     }
     return row;
+  }
+
+  // ---------- sync / pairing ----------
+  function renderSyncPanel() {
+    const panel = el('div', { class: 'panel sync-panel' });
+    panel.appendChild(el('div', { class: 'panel-title' }, 'Sync across devices'));
+    const link = window.Sync ? window.Sync.pairLink() : '';
+    panel.appendChild(el('div', { class: 'panel-hint' },
+      'Open this link on your other phone to share the same checklist, edits, actual amounts, and history. Keep it private — anyone with the link can view and edit this trip.'));
+
+    const input = el('input', { class: 'edit-input', value: link, readonly: 'readonly', 'aria-label': 'Pairing link' });
+    input.addEventListener('focus', () => input.select());
+    const copy = el('button', { class: 'btn-primary', type: 'button' }, ui.copied ? 'Copied ✓' : 'Copy link');
+    copy.addEventListener('click', async () => {
+      try { await navigator.clipboard.writeText(link); }
+      catch { input.focus(); input.select(); try { document.execCommand('copy'); } catch {} }
+      ui.copied = true; render();
+      setTimeout(() => { ui.copied = false; }, 1800);
+    });
+    panel.appendChild(el('div', { class: 'sync-link-row' }, [input, copy]));
+
+    const st = syncStatus();
+    panel.appendChild(el('div', { class: `sync-status sync-${st}` }, SYNC_LABELS[st] || 'Saved on this device'));
+
+    const close = el('button', { class: 'btn-ghost', type: 'button' }, 'Close');
+    close.addEventListener('click', () => { ui.syncPanel = false; render(); });
+    panel.appendChild(el('div', { class: 'panel-actions' }, [close]));
+    return panel;
   }
 
   // ---------- add / upload trip ----------
@@ -555,19 +592,30 @@
     }
 
     root.appendChild(renderToolbar(focus));
+    if (ui.syncPanel) root.appendChild(renderSyncPanel());
     if (ui.addPanel) root.appendChild(renderAddPanel());
 
     if (focus) root.appendChild(renderTrip(focus));
     else root.appendChild(el('div', { class: 'empty' }, 'No active trip. Tap “＋ Add trip” to upload one.'));
 
     root.appendChild(renderHistory(pastTrips));
-    root.appendChild(el('div', { class: 'offline-tag' }, 'Works offline · saves locally on this device'));
+    root.appendChild(el('div', { class: 'offline-tag', id: 'syncStatus' }, syncFooterText()));
   }
 
   render();
+  window.__renderApp = render;
 
   window.addEventListener('online', () => render());
   window.addEventListener('offline', () => render());
+  window.addEventListener('mytrips:sync-status', () => {
+    const n = document.getElementById('syncStatus');
+    if (n) n.textContent = syncFooterText();
+    if (ui.syncPanel) {
+      const s = document.querySelector('.sync-status');
+      const st = syncStatus();
+      if (s) { s.textContent = SYNC_LABELS[st] || 'Saved on this device'; s.className = `sync-status sync-${st}`; }
+    }
+  });
 
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => { navigator.serviceWorker.register('./sw.js').catch(() => {}); });

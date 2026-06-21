@@ -1,4 +1,4 @@
-const CACHE = 'my-trips-v4';
+const CACHE = 'my-trips-v5';
 const ASSETS = [
   './',
   './index.html',
@@ -6,6 +6,7 @@ const ASSETS = [
   './data.js',
   './store.js',
   './app.js',
+  './sync.js',
   './manifest.json',
   './icons/icon.svg',
   './icons/icon-192.png',
@@ -37,6 +38,7 @@ self.addEventListener('fetch', (event) => {
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return;
+  if (url.pathname.startsWith('/api/')) return; // never cache the sync API
 
   const codeLike = req.mode === 'navigate'
     || url.pathname.endsWith('/')

@@ -35,10 +35,23 @@ Pure HTML/CSS/vanilla JS — **no build step, no dependencies, no backend.** Tri
 from `data.js`, then persisted to and edited in `localStorage` per device (see `store.js`).
 This keeps it free to host, fully offline, and zero-maintenance.
 
-> **Per-device, no sync:** edits, uploaded trips, and completed-trip history live on the
-> device that made them. To share state across two phones in real time, add a small backend
-> (e.g. Upstash Redis / Vercel KV) keyed by a shared trip id — the storage layer in `store.js`
-> is structured to make that swap straightforward.
+### Cross-device sync (optional backend)
+
+When configured, the app syncs all state (checks, actuals, edits, history) across devices via
+a single Upstash Redis document keyed by an unguessable **space id**:
+
+- `api/state.js` — Vercel serverless function (`GET`/`PUT`), zero npm deps, talks to the
+  Upstash REST API. Version-guarded last-write-wins.
+- `sync.js` — client engine: pulls on load, debounced push on change, polls every 15s while
+  visible; falls back to localStorage when offline or the backend is absent.
+- **Pairing:** the **🔗 Sync** button shows a link containing the space id — open it on the
+  second device (`#space=…`) to join. No accounts. Anyone with the link can view/edit.
+
+**Provision** (one-time): `vercel integration add upstash/upstash-kv` (accept marketplace
+terms in the browser first), then `vercel env pull`. The function reads
+`UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` (or `KV_REST_API_URL` / `KV_REST_API_TOKEN`).
+
+Without those env vars the function returns 503 and the app stays fully functional per-device.
 
 The service worker is **network-first** for HTML/JS/CSS so published updates apply as soon as
 a device is online, with the cache as the offline fallback. Bump `SEED_REV` in `data.js` when

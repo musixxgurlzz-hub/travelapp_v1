@@ -705,6 +705,19 @@ textarea.edit-input { resize: vertical; line-height: 1.45; }
 .trip-budget .tb-act { color: var(--accent); font-weight: 700; }
 .trip-budget .tb-act.over { color: var(--warn-text); }
 
+/* ---- sync panel ---- */
+.sync-link-row { display: flex; gap: 8px; align-items: center; }
+.sync-link-row .edit-input { flex: 1; font-size: 12px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.sync-status {
+  margin-top: 10px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.sync-status.sync-synced { color: var(--accent); }
+.sync-status.sync-syncing, .sync-status.sync-idle { color: var(--info-text); }
+.sync-status.sync-offline, .sync-status.sync-disabled { color: var(--muted); }
+.sync-status.sync-error { color: var(--warn-text); }
+
 @media (min-width: 700px) {
   .shell { padding: 24px; }
   .title { font-size: 22px; }
