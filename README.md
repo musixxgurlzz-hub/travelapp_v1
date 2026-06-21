@@ -16,6 +16,10 @@ A mobile-first, offline-capable trip itinerary and checklist PWA. Currently focu
 - **Flight-time warning box** for the flagged Naha → Kobe Scoot ticket discrepancy
 - **Special Okinawa block** — family-hosted days render as a simple flight/date summary, no checklist
 - **Category tags** per item: transport · food · activity · shopping · tip
+- **Estimate vs actual budget** — each spend item has an "actual" amount box next to its
+  estimate; per-day (under the date) and trip-wide totals recalc live and turn red when actual
+  exceeds estimate. Actuals are stored separately (`trip:<id>:actuals`) so they survive
+  itinerary updates
 - **Reset button** with confirmation, scoped per trip
 - **Mark trip complete** — add notes, then move the trip into history (reopen any time to undo)
 - **Trip history** section for past trips (notes + checked state preserved)

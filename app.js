@@ -44,6 +44,30 @@
     catch { return ''; }
   };
 
+  // ---- budget helpers ----
+  // Estimate prices are free-form ("¥740 for 2", "~¥400–600 for 2", "Free",
+  // "Budget as needed"). Parse a representative yen figure: ranges -> midpoint,
+  // non-spend strings -> 0. Used only for the *estimate* totals; actuals are
+  // clean numbers the user types.
+  function parseYen(str) {
+    if (!str) return 0;
+    const s = String(str).toLowerCase();
+    if (/included|refund/.test(s)) return 0;
+    if (!/\d/.test(s)) return 0;                 // Free, Paid, —, etc.
+    const clean = s.replace(/,/g, '');
+    const nums = (clean.match(/\d+(?:\.\d+)?/g) || []).map(Number);
+    if (!nums.length) return 0;
+    if (/\d\s*[–-]\s*\d/.test(clean) && nums.length >= 2) return Math.round((nums[0] + nums[1]) / 2);
+    return Math.round(nums[0]);
+  }
+  // Show an actual-amount box when the item represents real spend.
+  const hasSpend = (str) => parseYen(str) > 0 || /budget|as needed/i.test(str || '');
+
+  const loadActuals = (key) => { try { return JSON.parse(localStorage.getItem(key) || '{}') || {}; } catch { return {}; } };
+  const saveActuals = (key, map) => localStorage.setItem(key, JSON.stringify(map));
+  const dayEst = (day) => (day.items || []).reduce((s, i) => s + parseYen(i.price), 0);
+  const yen = (n) => '¥' + Number(n || 0).toLocaleString();
+
   // ---------- app + toolbar ----------
   function renderAppHeader() {
     return el('div', { class: 'app-header' }, [
@@ -189,28 +213,53 @@
   // ---------- item: view + edit ----------
   const TAGS = ['transport', 'food', 'activity', 'shopping', 'tip'];
 
-  function renderItemView(item, checked, storageKey, onChange) {
+  function renderItemView(item, o) {
+    const { checked, checkedKey, actuals, actualsKey, onCheckChange, onActualChange } = o;
     const isDone = checked.has(item.id);
     const cb = el('div', { class: 'checkbox', role: 'checkbox', 'aria-checked': isDone ? 'true' : 'false', tabindex: '0' });
+
+    const foot = el('div', { class: 'item-foot' });
+    if (item.price && item.price !== '—') foot.appendChild(el('span', { class: 'item-price' }, item.price));
+    if (hasSpend(item.price)) {
+      const input = el('input', {
+        class: 'actual-input', type: 'text', inputmode: 'numeric',
+        placeholder: 'actual', 'aria-label': `Actual amount for ${item.label}`,
+        value: actuals[item.id] != null ? String(actuals[item.id]) : '',
+      });
+      const stop = (e) => e.stopPropagation();
+      const box = el('label', { class: 'actual-box' }, [el('span', { class: 'actual-yen' }, '¥'), input]);
+      box.addEventListener('click', stop);
+      input.addEventListener('keydown', stop);
+      input.addEventListener('input', () => {
+        const v = input.value.replace(/[^\d]/g, '');
+        if (v !== input.value) input.value = v;
+        if (v === '') delete actuals[item.id]; else actuals[item.id] = Number(v);
+        saveActuals(actualsKey, actuals);
+        onActualChange();
+      });
+      foot.appendChild(box);
+    }
+    foot.appendChild(el('span', { class: `tag ${item.tag}` }, item.tag));
+
     const body = el('div', { class: 'item-body' }, [
       item.time ? el('div', { class: 'item-time' }, item.time) : null,
       el('div', { class: 'item-label' }, item.label),
       item.note ? el('div', { class: 'item-note' }, item.note) : null,
-      el('div', { class: 'item-foot' }, [
-        item.price && item.price !== '—' ? el('span', { class: 'item-price' }, item.price) : null,
-        el('span', { class: `tag ${item.tag}` }, item.tag),
-      ]),
+      foot,
     ]);
     const row = el('div', { class: `item${isDone ? ' done' : ''}` }, [cb, body]);
     const toggle = () => {
       if (checked.has(item.id)) checked.delete(item.id); else checked.add(item.id);
-      saveSet(storageKey, checked);
+      saveSet(checkedKey, checked);
       row.classList.toggle('done');
       cb.setAttribute('aria-checked', checked.has(item.id) ? 'true' : 'false');
-      onChange();
+      onCheckChange();
     };
     cb.addEventListener('click', toggle);
-    row.addEventListener('click', (e) => { if (e.target === cb || cb.contains(e.target)) return; toggle(); });
+    row.addEventListener('click', (e) => {
+      if (e.target === cb || cb.contains(e.target) || (e.target.closest && e.target.closest('.actual-box'))) return;
+      toggle();
+    });
     cb.addEventListener('keydown', (e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); toggle(); } });
     return row;
   }
@@ -243,7 +292,7 @@
 
   // ---------- day ----------
   function renderDay(day, ctx) {
-    const { trip, checked, openDays, checkedKey, openKey, onAnyChange } = ctx;
+    const { trip, checked, openDays, checkedKey, openKey, onAnyChange, actuals, actualsKey, updateTripBudget } = ctx;
     const open = ui.editing || openDays.has(day.id);
     const card = el('div', { class: `card${open ? ' open' : ''}`, dataset: { day: day.id } });
 
@@ -258,12 +307,26 @@
     };
     updateBadge();
 
+    const titles = el('div', { class: 'day-titles' }, [
+      el('div', { class: 'day-name' }, day.name),
+      el('div', { class: 'day-date' }, day.dateLabel),
+    ]);
+    let updateDayBudget = () => {};
+    if (!day.isOkinawa) {
+      const est = dayEst(day);
+      const dayBudget = el('div', { class: 'day-budget' });
+      updateDayBudget = () => {
+        const act = day.items.reduce((s, i) => s + (Number(actuals[i.id]) || 0), 0);
+        dayBudget.innerHTML = '';
+        dayBudget.appendChild(el('span', { class: 'db-est' }, `Est ${yen(est)}`));
+        dayBudget.appendChild(el('span', { class: 'db-act' + (act > est && est > 0 ? ' over' : '') }, `Actual ${yen(act)}`));
+      };
+      updateDayBudget();
+      titles.appendChild(dayBudget);
+    }
     const header = el('div', { class: 'day-header' }, [
       el('span', { class: 'day-emoji' }, day.emoji),
-      el('div', { class: 'day-titles' }, [
-        el('div', { class: 'day-name' }, day.name),
-        el('div', { class: 'day-date' }, day.dateLabel),
-      ]),
+      titles,
       el('div', { class: 'day-meta' }, [badge, el('span', { class: 'chevron' }, '▼')]),
     ]);
     if (!ui.editing) {
@@ -304,7 +367,11 @@
       (day.okinawaRows || []).forEach((r) => ok.appendChild(el('div', { class: 'okinawa-row' }, [el('div', { class: 'time' }, r.time), el('div', { class: 'text' }, r.text)])));
       body.appendChild(ok);
     } else {
-      day.items.forEach((item) => body.appendChild(renderItemView(item, checked, checkedKey, () => { updateBadge(); onAnyChange(); })));
+      day.items.forEach((item) => body.appendChild(renderItemView(item, {
+        checked, checkedKey, actuals, actualsKey,
+        onCheckChange: () => { updateBadge(); onAnyChange(); },
+        onActualChange: () => { updateDayBudget(); updateTripBudget(); },
+      })));
     }
     card.appendChild(header); card.appendChild(body); return card;
   }
@@ -356,16 +423,29 @@
 
     const checkedKey = tripKey(trip.id, 'checked');
     const openKey = tripKey(trip.id, 'open-days');
+    const actualsKey = tripKey(trip.id, 'actuals');
     const checked = loadSet(checkedKey);
     const openDays = loadSet(openKey);
+    const actuals = loadActuals(actualsKey);
     const total = Store.countCheckable(trip);
 
     const progress = renderProgress(total);
     progress._update(checked.size);
     if (!ui.editing) wrap.appendChild(progress);
 
+    const tripBudget = el('div', { class: 'trip-budget' });
+    const updateTripBudget = () => {
+      let est = 0, act = 0;
+      trip.days.forEach((d) => (d.items || []).forEach((i) => { est += parseYen(i.price); act += Number(actuals[i.id]) || 0; }));
+      tripBudget.innerHTML = '';
+      tripBudget.appendChild(el('span', { class: 'tb-est' }, `Estimated ${yen(est)}`));
+      tripBudget.appendChild(el('span', { class: 'tb-act' + (act > est && est > 0 ? ' over' : '') }, `Actual ${yen(act)}`));
+    };
+    updateTripBudget();
+    if (!ui.editing) wrap.appendChild(tripBudget);
+
     const onAnyChange = () => progress._update(checked.size);
-    const ctx = { trip, checked, openDays, checkedKey, openKey, onAnyChange };
+    const ctx = { trip, checked, openDays, checkedKey, openKey, onAnyChange, actuals, actualsKey, updateTripBudget };
     for (const day of trip.days) wrap.appendChild(renderDay(day, ctx));
 
     if (ui.editing) {
