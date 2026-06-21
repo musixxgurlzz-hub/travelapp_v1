@@ -17,18 +17,35 @@ A mobile-first, offline-capable trip itinerary and checklist PWA. Currently focu
 - **Special Okinawa block** — family-hosted days render as a simple flight/date summary, no checklist
 - **Category tags** per item: transport · food · activity · shopping · tip
 - **Reset button** with confirmation, scoped per trip
-- **Trip history** section for past trips (checked state preserved)
+- **Mark trip complete** — add notes, then move the trip into history (reopen any time to undo)
+- **Trip history** section for past trips (notes + checked state preserved)
+- **Add / upload trips** — import a trip from a `.json` file or pasted JSON; **Export** any trip
+  as JSON to use as a template for the next one
+- **In-app editing** — edit, add, and delete items and day details (enabled when online; the
+  checklist stays usable offline)
+- **Editable trip location title** and details
 
 ## Tech
 
-Pure HTML/CSS/vanilla JS — **no build step, no dependencies, no backend.** State lives in
-`localStorage` per device. This keeps it free to host, fully offline, and zero-maintenance.
+Pure HTML/CSS/vanilla JS — **no build step, no dependencies, no backend.** Trips are seeded
+from `data.js`, then persisted to and edited in `localStorage` per device (see `store.js`).
+This keeps it free to host, fully offline, and zero-maintenance.
+
+> **Per-device, no sync:** edits, uploaded trips, and completed-trip history live on the
+> device that made them. To share state across two phones in real time, add a small backend
+> (e.g. Upstash Redis / Vercel KV) keyed by a shared trip id — the storage layer in `store.js`
+> is structured to make that swap straightforward.
+
+The service worker is **network-first** for HTML/JS/CSS so published updates apply as soon as
+a device is online, with the cache as the offline fallback. Bump `SEED_REV` in `data.js` when
+you edit the published itinerary so unedited devices pick up the new data.
 
 | File | Purpose |
 | --- | --- |
 | `index.html` | App shell |
-| `data.js` | All trip data (`TRIPS` array + `CURRENT_TRIP_ID`) — the source of truth |
-| `app.js` | Rendering + checklist/persistence logic |
+| `data.js` | Seed trip data (`TRIPS` + `CURRENT_TRIP_ID` + `SEED_REV`) |
+| `store.js` | localStorage-backed trip store (seed, edit, complete, import/export) |
+| `app.js` | Rendering, checklist, edit mode, add/complete UI |
 | `styles.css` | Mobile-first styling (max-width 600px) |
 | `manifest.json` | PWA manifest |
 | `sw.js` | Service worker (offline cache) |

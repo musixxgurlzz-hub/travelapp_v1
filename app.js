@@ -1,6 +1,10 @@
 (() => {
   const APP_NAME = 'My Trips';
 
+  // ---- transient UI state (not persisted) ----
+  const ui = { editing: false, donePanel: false, addPanel: false, addError: '' };
+
+  // ---- per-trip ephemeral state (checked items, open accordions) ----
   const tripKey = (tripId, kind) => `trip:${tripId}:${kind}`;
   const loadSet = (key) => {
     try { return new Set(JSON.parse(localStorage.getItem(key) || '[]')); }
@@ -9,12 +13,14 @@
   const saveSet = (key, set) => localStorage.setItem(key, JSON.stringify([...set]));
 
   const root = document.getElementById('app');
+  const isOnline = () => navigator.onLine;
 
   const el = (tag, attrs = {}, children = []) => {
     const node = document.createElement(tag);
     for (const [k, v] of Object.entries(attrs)) {
       if (k === 'class') node.className = v;
       else if (k === 'dataset') Object.assign(node.dataset, v);
+      else if (k === 'value') node.value = v;
       else if (k.startsWith('on') && typeof v === 'function') node.addEventListener(k.slice(2), v);
       else if (v !== undefined && v !== null && v !== false) node.setAttribute(k, v);
     }
@@ -25,10 +31,20 @@
     return node;
   };
 
-  function countCheckable(trip) {
-    return trip.days.filter(d => !d.isOkinawa).reduce((n, d) => n + d.items.length, 0);
+  function download(filename, obj) {
+    const blob = new Blob([JSON.stringify(obj, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = el('a', { href: url, download: filename });
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1500);
   }
 
+  const fmtDate = (iso) => {
+    try { return new Date(iso).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }); }
+    catch { return ''; }
+  };
+
+  // ---------- app + toolbar ----------
   function renderAppHeader() {
     return el('div', { class: 'app-header' }, [
       el('div', { class: 'app-brand' }, [
@@ -39,39 +55,128 @@
     ]);
   }
 
+  function renderToolbar(trip) {
+    const row = el('div', { class: 'toolbar' });
+    const addBtn = el('button', { class: 'tool-btn', type: 'button' }, '＋ Add trip');
+    addBtn.addEventListener('click', () => { ui.addPanel = !ui.addPanel; ui.addError = ''; render(); });
+    row.appendChild(addBtn);
+
+    if (trip) {
+      const editBtn = el('button', {
+        class: `tool-btn${ui.editing ? ' active' : ''}`, type: 'button',
+        title: isOnline() ? '' : 'Connect to the internet to edit',
+      }, ui.editing ? '✓ Done editing' : '✎ Edit');
+      editBtn.addEventListener('click', () => {
+        if (!ui.editing && !isOnline()) {
+          alert('You\'re offline. Connect to the internet to edit the itinerary — the checklist still works offline.');
+          return;
+        }
+        ui.editing = !ui.editing; ui.donePanel = false; render();
+      });
+      row.appendChild(editBtn);
+
+      const exportBtn = el('button', { class: 'tool-btn', type: 'button' }, '⤓ Export');
+      exportBtn.addEventListener('click', () => {
+        const data = Store.exportTrip(trip.id);
+        if (data) download(`${Store.slug(trip.destination)}.json`, data);
+      });
+      row.appendChild(exportBtn);
+    }
+    return row;
+  }
+
+  // ---------- add / upload trip ----------
+  function renderAddPanel() {
+    const panel = el('div', { class: 'panel add-panel' });
+    panel.appendChild(el('div', { class: 'panel-title' }, 'Add a trip'));
+    panel.appendChild(el('div', { class: 'panel-hint' },
+      'Upload a trip JSON file, or paste the JSON below. Tip: use Export on an existing trip to get the exact format to hand to Claude for your next trip.'));
+
+    const ta = el('textarea', { class: 'paste-area', placeholder: '{ "destination": "Bali", "dateRange": "...", "days": [ ... ] }', rows: '6' });
+
+    const file = el('input', { type: 'file', accept: '.json,application/json', class: 'file-input' });
+    file.addEventListener('change', (e) => {
+      const f = e.target.files && e.target.files[0];
+      if (!f) return;
+      f.text().then((txt) => { ta.value = txt; });
+    });
+
+    if (ui.addError) panel.appendChild(el('div', { class: 'panel-error' }, ui.addError));
+
+    const fileRow = el('label', { class: 'file-row' }, ['Choose a .json file', file]);
+    panel.appendChild(fileRow);
+    panel.appendChild(el('div', { class: 'or-divider' }, 'or paste JSON'));
+    panel.appendChild(ta);
+
+    const actions = el('div', { class: 'panel-actions' });
+    const importBtn = el('button', { class: 'btn-primary', type: 'button' }, 'Import trip');
+    importBtn.addEventListener('click', () => {
+      const res = Store.addTrip(ta.value.trim());
+      if (!res.ok) { ui.addError = res.errors.join(' '); render(); return; }
+      ui.addPanel = false; ui.addError = ''; ui.editing = false;
+      render();
+    });
+    const cancelBtn = el('button', { class: 'btn-ghost', type: 'button' }, 'Cancel');
+    cancelBtn.addEventListener('click', () => { ui.addPanel = false; ui.addError = ''; render(); });
+    actions.appendChild(importBtn); actions.appendChild(cancelBtn);
+    panel.appendChild(actions);
+    return panel;
+  }
+
+  // ---------- trip header ----------
   function renderTripHeader(trip) {
+    if (ui.editing) {
+      const wrap = el('div', { class: 'trip-header editing' });
+      wrap.appendChild(el('div', { class: 'edit-section-title' }, 'Trip details'));
+      const mk = (label, key, ph) => {
+        const inp = el('input', { class: 'edit-input', value: trip[key] || '', placeholder: ph || '' });
+        inp.addEventListener('change', () => { Store.updateTrip(trip.id, { [key]: inp.value }); });
+        return el('label', { class: 'edit-field' }, [el('span', { class: 'edit-label' }, label), inp]);
+      };
+      wrap.appendChild(mk('Flag emoji', 'flag', '🧳'));
+      wrap.appendChild(mk('Location title', 'destination', 'e.g. Japan'));
+      wrap.appendChild(mk('Subtitle', 'subtitle', 'e.g. Kyoto · Osaka'));
+      wrap.appendChild(mk('Date range', 'dateRange', 'e.g. June 24–30, 2026'));
+      return wrap;
+    }
     return el('div', { class: 'trip-header' }, [
       el('div', { class: 'trip-status-row' }, [
-        el('span', { class: `pill trip-status status-${trip.status}` }, trip.status),
+        el('span', { class: `pill trip-status status-${trip.status || 'upcoming'}` }, trip.status || 'upcoming'),
         trip.flag ? el('span', { class: 'trip-flag' }, trip.flag) : null,
         el('span', { class: 'trip-destination' }, trip.destination),
       ]),
-      el('div', { class: 'trip-dates' }, `${trip.dateRange} · ${trip.subtitle}`),
+      el('div', { class: 'trip-dates' }, [trip.dateRange, trip.subtitle].filter(Boolean).join(' · ')),
     ]);
   }
 
   function renderBanners(trip) {
     const m = trip.meta;
-    return [
-      el('div', { class: 'banner budget' },
-        `Budget ~¥${m.budgetYen.toLocaleString()} for ${m.travelers} (bring ¥${m.budgetBufferYen.toLocaleString()} buffer) · ${m.exchangeRate}`
-      ),
-      el('div', { class: 'banner info' },
-        `Hotels: Kyoto ${m.hotelKyoto} · Osaka ${m.hotelOsaka}. Payment: ${m.payment}.`
-      ),
-    ];
+    if (!m) return [];
+    const out = [];
+    if (m.budgetYen) {
+      out.push(el('div', { class: 'banner budget' },
+        `Budget ~¥${Number(m.budgetYen).toLocaleString()} for ${m.travelers || 2}` +
+        (m.budgetBufferYen ? ` (bring ¥${Number(m.budgetBufferYen).toLocaleString()} buffer)` : '') +
+        (m.exchangeRate ? ` · ${m.exchangeRate}` : '')));
+    }
+    if (m.hotelKyoto || m.hotelOsaka || m.payment) {
+      const bits = [];
+      if (m.hotelKyoto) bits.push(`Kyoto ${m.hotelKyoto}`);
+      if (m.hotelOsaka) bits.push(`Osaka ${m.hotelOsaka}`);
+      out.push(el('div', { class: 'banner info' },
+        (bits.length ? `Hotels: ${bits.join(' · ')}. ` : '') + (m.payment ? `Payment: ${m.payment}.` : '')));
+    }
+    return out;
   }
 
   function renderProgress(total) {
     const wrap = el('div', { class: 'progress-wrap' });
     const row = el('div', { class: 'progress-row' });
-    const label = el('span', {}, '');
-    const pct = el('span', {}, '');
+    const label = el('span', {}, ''); const pct = el('span', {}, '');
     row.appendChild(label); row.appendChild(pct);
     const bar = el('div', { class: 'progress-bar' });
     const fill = el('div', { class: 'progress-fill' });
-    bar.appendChild(fill);
-    wrap.appendChild(row); wrap.appendChild(bar);
+    bar.appendChild(fill); wrap.appendChild(row); wrap.appendChild(bar);
     wrap._update = (done) => {
       const ratio = total ? done / total : 0;
       label.textContent = `${done} of ${total} items`;
@@ -81,7 +186,10 @@
     return wrap;
   }
 
-  function renderItem(item, checked, storageKey, onChange) {
+  // ---------- item: view + edit ----------
+  const TAGS = ['transport', 'food', 'activity', 'shopping', 'tip'];
+
+  function renderItemView(item, checked, storageKey, onChange) {
     const isDone = checked.has(item.id);
     const cb = el('div', { class: 'checkbox', role: 'checkbox', 'aria-checked': isDone ? 'true' : 'false', tabindex: '0' });
     const body = el('div', { class: 'item-body' }, [
@@ -95,40 +203,58 @@
     ]);
     const row = el('div', { class: `item${isDone ? ' done' : ''}` }, [cb, body]);
     const toggle = () => {
-      if (checked.has(item.id)) checked.delete(item.id);
-      else checked.add(item.id);
+      if (checked.has(item.id)) checked.delete(item.id); else checked.add(item.id);
       saveSet(storageKey, checked);
       row.classList.toggle('done');
       cb.setAttribute('aria-checked', checked.has(item.id) ? 'true' : 'false');
       onChange();
     };
     cb.addEventListener('click', toggle);
-    row.addEventListener('click', (e) => {
-      if (e.target === cb || cb.contains(e.target)) return;
-      toggle();
-    });
-    cb.addEventListener('keydown', (e) => {
-      if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); toggle(); }
-    });
+    row.addEventListener('click', (e) => { if (e.target === cb || cb.contains(e.target)) return; toggle(); });
+    cb.addEventListener('keydown', (e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); toggle(); } });
     return row;
   }
 
+  function renderItemEdit(trip, day, item) {
+    const row = el('div', { class: 'item-edit' });
+    const persist = () => Store.saveTrip(trip);
+    const inp = (key, ph) => {
+      const i = el('input', { class: 'edit-input', value: item[key] || '', placeholder: ph });
+      i.addEventListener('change', () => { item[key] = i.value; persist(); });
+      return i;
+    };
+    row.appendChild(inp('time', 'Time (e.g. ~9:00 AM)'));
+    row.appendChild(inp('label', 'What to do'));
+    row.appendChild(inp('note', 'Note (optional)'));
+    row.appendChild(inp('price', 'Price (e.g. ¥440 for 2)'));
+
+    const sel = el('select', { class: 'edit-input' });
+    TAGS.forEach((t) => sel.appendChild(el('option', Object.assign({ value: t }, t === item.tag ? { selected: 'selected' } : {}), t)));
+    sel.addEventListener('change', () => { item.tag = sel.value; persist(); });
+
+    const del = el('button', { class: 'btn-del', type: 'button', title: 'Delete item' }, '✕');
+    del.addEventListener('click', () => {
+      day.items = day.items.filter((x) => x !== item);
+      persist(); render();
+    });
+    row.appendChild(el('div', { class: 'item-edit-foot' }, [sel, del]));
+    return row;
+  }
+
+  // ---------- day ----------
   function renderDay(day, ctx) {
-    const { checked, openDays, checkedKey, openKey, onAnyChange } = ctx;
-    const card = el('div', { class: `card${openDays.has(day.id) ? ' open' : ''}`, dataset: { day: day.id } });
+    const { trip, checked, openDays, checkedKey, openKey, onAnyChange } = ctx;
+    const open = ui.editing || openDays.has(day.id);
+    const card = el('div', { class: `card${open ? ' open' : ''}`, dataset: { day: day.id } });
 
     const badge = el('span', { class: 'day-badge' }, '');
     const updateBadge = () => {
-      if (day.isOkinawa) {
-        badge.textContent = 'family';
-        badge.className = 'day-badge';
-        return;
-      }
+      if (day.isOkinawa) { badge.textContent = 'family'; badge.className = 'day-badge'; return; }
       const total = day.items.length;
-      const done = day.items.filter(i => checked.has(i.id)).length;
-      const isAllDone = done === total && total > 0;
-      badge.textContent = isAllDone ? '✓ done' : `${done}/${total}`;
-      badge.className = 'day-badge' + (isAllDone ? ' done' : '');
+      const done = day.items.filter((i) => checked.has(i.id)).length;
+      const all = done === total && total > 0;
+      badge.textContent = all ? '✓ done' : `${done}/${total}`;
+      badge.className = 'day-badge' + (all ? ' done' : '');
     };
     updateBadge();
 
@@ -140,51 +266,89 @@
       ]),
       el('div', { class: 'day-meta' }, [badge, el('span', { class: 'chevron' }, '▼')]),
     ]);
-    header.addEventListener('click', () => {
-      card.classList.toggle('open');
-      if (card.classList.contains('open')) openDays.add(day.id);
-      else openDays.delete(day.id);
-      saveSet(openKey, openDays);
-    });
+    if (!ui.editing) {
+      header.addEventListener('click', () => {
+        card.classList.toggle('open');
+        if (card.classList.contains('open')) openDays.add(day.id); else openDays.delete(day.id);
+        saveSet(openKey, openDays);
+      });
+    }
 
     const body = el('div', { class: 'day-body' });
 
-    if (day.weather) {
-      body.appendChild(el('span', { class: `weather-pill ${day.weatherClass || 'clear'}` }, day.weather));
+    if (ui.editing) {
+      body.appendChild(renderDayEditFields(trip, day));
+      if (day.isOkinawa) {
+        (day.okinawaRows || []).forEach((r) => body.appendChild(renderOkinawaEditRow(trip, day, r)));
+        const add = el('button', { class: 'btn-add', type: 'button' }, '＋ Add summary row');
+        add.addEventListener('click', () => { (day.okinawaRows = day.okinawaRows || []).push({ time: '', text: '' }); Store.saveTrip(trip); render(); });
+        body.appendChild(add);
+      } else {
+        day.items.forEach((it) => body.appendChild(renderItemEdit(trip, day, it)));
+        const add = el('button', { class: 'btn-add', type: 'button' }, '＋ Add item');
+        add.addEventListener('click', () => {
+          day.items.push({ id: `${day.id}i${Date.now().toString(36)}`, time: '', label: 'New item', note: '', price: '—', tag: 'activity' });
+          Store.saveTrip(trip); render();
+        });
+        body.appendChild(add);
+      }
+      card.appendChild(header); card.appendChild(body); return card;
     }
-    if (day.flightWarning) {
-      body.appendChild(el('div', { class: 'warn-box' }, [
-        el('strong', { class: 'label' }, '⚠ Flight time check'),
-        document.createTextNode(day.flightWarning),
-      ]));
-    }
-    if (day.rainPlan) {
-      body.appendChild(el('div', { class: 'rain-plan' }, [
-        el('strong', { class: 'label' }, '☂ Rain plan'),
-        document.createTextNode(day.rainPlan),
-      ]));
-    }
+
+    if (day.weather) body.appendChild(el('span', { class: `weather-pill ${day.weatherClass || 'clear'}` }, day.weather));
+    if (day.flightWarning) body.appendChild(el('div', { class: 'warn-box' }, [el('strong', { class: 'label' }, '⚠ Flight time check'), document.createTextNode(day.flightWarning)]));
+    if (day.rainPlan) body.appendChild(el('div', { class: 'rain-plan' }, [el('strong', { class: 'label' }, '☂ Rain plan'), document.createTextNode(day.rainPlan)]));
 
     if (day.isOkinawa) {
-      const okCard = el('div', { class: 'okinawa-card' });
-      for (const row of day.okinawaRows) {
-        okCard.appendChild(el('div', { class: 'okinawa-row' }, [
-          el('div', { class: 'time' }, row.time),
-          el('div', { class: 'text' }, row.text),
-        ]));
-      }
-      body.appendChild(okCard);
+      const ok = el('div', { class: 'okinawa-card' });
+      (day.okinawaRows || []).forEach((r) => ok.appendChild(el('div', { class: 'okinawa-row' }, [el('div', { class: 'time' }, r.time), el('div', { class: 'text' }, r.text)])));
+      body.appendChild(ok);
     } else {
-      for (const item of day.items) {
-        body.appendChild(renderItem(item, checked, checkedKey, () => { updateBadge(); onAnyChange(); }));
-      }
+      day.items.forEach((item) => body.appendChild(renderItemView(item, checked, checkedKey, () => { updateBadge(); onAnyChange(); })));
     }
-
-    card.appendChild(header);
-    card.appendChild(body);
-    return card;
+    card.appendChild(header); card.appendChild(body); return card;
   }
 
+  function renderDayEditFields(trip, day) {
+    const wrap = el('div', { class: 'day-edit' });
+    const persist = () => Store.saveTrip(trip);
+    const mk = (label, key, ph) => {
+      const i = el('input', { class: 'edit-input', value: day[key] || '', placeholder: ph });
+      i.addEventListener('change', () => { day[key] = i.value; persist(); });
+      return el('label', { class: 'edit-field' }, [el('span', { class: 'edit-label' }, label), i]);
+    };
+    wrap.appendChild(mk('Emoji', 'emoji', '📅'));
+    wrap.appendChild(mk('Day title', 'name', 'e.g. June 24 — Arrival'));
+    wrap.appendChild(mk('Date label', 'dateLabel', 'e.g. Wednesday'));
+    wrap.appendChild(mk('Weather', 'weather', 'e.g. 26°C · Clear'));
+    const sel = el('select', { class: 'edit-input' });
+    ['clear', 'mixed'].forEach((w) => sel.appendChild(el('option', Object.assign({ value: w }, w === (day.weatherClass || 'clear') ? { selected: 'selected' } : {}), w)));
+    sel.addEventListener('change', () => { day.weatherClass = sel.value; persist(); });
+    wrap.appendChild(el('label', { class: 'edit-field' }, [el('span', { class: 'edit-label' }, 'Weather color'), sel]));
+    const rp = el('textarea', { class: 'edit-input', rows: '2', placeholder: 'Rain plan (optional)' }); rp.value = day.rainPlan || '';
+    rp.addEventListener('change', () => { day.rainPlan = rp.value; persist(); });
+    wrap.appendChild(el('label', { class: 'edit-field' }, [el('span', { class: 'edit-label' }, 'Rain plan'), rp]));
+
+    const del = el('button', { class: 'btn-del-day', type: 'button' }, '🗑 Delete this day');
+    del.addEventListener('click', () => { if (confirm(`Delete "${day.name}"?`)) { trip.days = trip.days.filter((d) => d !== day); persist(); render(); } });
+    wrap.appendChild(del);
+    return wrap;
+  }
+
+  function renderOkinawaEditRow(trip, day, r) {
+    const row = el('div', { class: 'item-edit' });
+    const persist = () => Store.saveTrip(trip);
+    const t = el('input', { class: 'edit-input', value: r.time || '', placeholder: 'Time / date' });
+    t.addEventListener('change', () => { r.time = t.value; persist(); });
+    const x = el('input', { class: 'edit-input', value: r.text || '', placeholder: 'Description' });
+    x.addEventListener('change', () => { r.text = x.value; persist(); });
+    const del = el('button', { class: 'btn-del', type: 'button', title: 'Delete row' }, '✕');
+    del.addEventListener('click', () => { day.okinawaRows = day.okinawaRows.filter((y) => y !== r); persist(); render(); });
+    row.appendChild(t); row.appendChild(x); row.appendChild(el('div', { class: 'item-edit-foot' }, [del]));
+    return row;
+  }
+
+  // ---------- focus trip ----------
   function renderTrip(trip) {
     const wrap = el('section', { class: 'trip-section', dataset: { trip: trip.id } });
     wrap.appendChild(renderTripHeader(trip));
@@ -194,63 +358,127 @@
     const openKey = tripKey(trip.id, 'open-days');
     const checked = loadSet(checkedKey);
     const openDays = loadSet(openKey);
-    const total = countCheckable(trip);
+    const total = Store.countCheckable(trip);
 
     const progress = renderProgress(total);
     progress._update(checked.size);
-    wrap.appendChild(progress);
+    if (!ui.editing) wrap.appendChild(progress);
 
     const onAnyChange = () => progress._update(checked.size);
-    const ctx = { checked, openDays, checkedKey, openKey, onAnyChange };
-
+    const ctx = { trip, checked, openDays, checkedKey, openKey, onAnyChange };
     for (const day of trip.days) wrap.appendChild(renderDay(day, ctx));
 
-    const reset = el('button', { class: 'btn-reset', type: 'button' }, 'Reset all checks');
-    reset.addEventListener('click', () => {
-      if (!confirm(`Clear all checked items for ${trip.destination}?`)) return;
-      checked.clear();
-      saveSet(checkedKey, checked);
-      render();
-    });
-    wrap.appendChild(el('div', { class: 'trip-footer' }, [reset]));
+    if (ui.editing) {
+      const addDay = el('button', { class: 'btn-add big', type: 'button' }, '＋ Add a day');
+      addDay.addEventListener('click', () => {
+        trip.days.push({ id: `d${Date.now().toString(36)}`, emoji: '📅', name: 'New day', dateLabel: '', weather: '', weatherClass: 'clear', rainPlan: '', items: [] });
+        Store.saveTrip(trip); render();
+      });
+      wrap.appendChild(addDay);
+      const doneEdit = el('button', { class: 'btn-primary wide', type: 'button' }, '✓ Done editing');
+      doneEdit.addEventListener('click', () => { ui.editing = false; render(); });
+      wrap.appendChild(doneEdit);
+      return wrap;
+    }
+
+    // bottom actions (view mode)
+    const actions = el('div', { class: 'trip-footer' });
+    if (ui.donePanel) {
+      actions.appendChild(renderDonePanel(trip));
+    } else {
+      const complete = el('button', { class: 'btn-complete', type: 'button' }, '✓ Mark trip complete');
+      complete.addEventListener('click', () => { ui.donePanel = true; render(); });
+      actions.appendChild(complete);
+      const reset = el('button', { class: 'btn-reset', type: 'button' }, 'Reset all checks');
+      reset.addEventListener('click', () => {
+        if (!confirm(`Clear all checked items for ${trip.destination}?`)) return;
+        checked.clear(); saveSet(checkedKey, checked); render();
+      });
+      actions.appendChild(reset);
+    }
+    wrap.appendChild(actions);
     return wrap;
   }
 
+  function renderDonePanel(trip) {
+    const panel = el('div', { class: 'panel done-panel' });
+    panel.appendChild(el('div', { class: 'panel-title' }, 'Wrap up this trip'));
+    panel.appendChild(el('div', { class: 'panel-hint' }, 'Add any notes — highlights, memories, what to remember — then move it to your trip history. You can reopen it later.'));
+    const ta = el('textarea', { class: 'paste-area', rows: '4', placeholder: 'Trip notes (optional)…' });
+    ta.value = trip.notes || '';
+    panel.appendChild(ta);
+    const actions = el('div', { class: 'panel-actions' });
+    const save = el('button', { class: 'btn-primary', type: 'button' }, 'Save & move to history');
+    save.addEventListener('click', () => {
+      Store.completeTrip(trip.id, ta.value.trim());
+      const next = Store.getTrips().find((t) => t.status !== 'past');
+      if (next) Store.setCurrentId(next.id);
+      ui.donePanel = false; render();
+    });
+    const cancel = el('button', { class: 'btn-ghost', type: 'button' }, 'Cancel');
+    cancel.addEventListener('click', () => { ui.donePanel = false; render(); });
+    actions.appendChild(save); actions.appendChild(cancel);
+    panel.appendChild(actions);
+    return panel;
+  }
+
+  // ---------- history ----------
   function renderHistory(pastTrips) {
     const wrap = el('section', { class: 'history-section' });
     wrap.appendChild(el('h2', { class: 'history-title' }, 'Trip history'));
     if (!pastTrips.length) {
-      wrap.appendChild(el('div', { class: 'history-empty' },
-        'Past trips appear here once they end — your checked items stay saved so you can look back.'));
+      wrap.appendChild(el('div', { class: 'history-empty' }, 'Completed trips appear here — with your notes and checked items saved so you can look back.'));
       return wrap;
     }
     for (const t of pastTrips) {
-      const total = countCheckable(t);
+      const total = Store.countCheckable(t);
       const done = loadSet(tripKey(t.id, 'checked')).size;
-      wrap.appendChild(el('div', { class: 'history-card' }, [
+      const card = el('div', { class: 'history-card' }, [
         el('div', { class: 'history-row' }, [
           t.flag ? el('span', { class: 'trip-flag' }, t.flag) : null,
           el('div', { class: 'history-titles' }, [
             el('div', { class: 'history-dest' }, t.destination),
-            el('div', { class: 'history-dates' }, `${t.dateRange} · ${t.subtitle}`),
+            el('div', { class: 'history-dates' }, [t.dateRange, t.subtitle].filter(Boolean).join(' · ')),
+            t.completedAt ? el('div', { class: 'history-completed' }, `Completed ${fmtDate(t.completedAt)}`) : null,
           ]),
           el('span', { class: 'history-stats' }, `${done}/${total}`),
         ]),
-      ]));
+      ]);
+      if (t.notes) card.appendChild(el('div', { class: 'history-notes' }, t.notes));
+      const acts = el('div', { class: 'history-actions' });
+      const reopen = el('button', { class: 'mini-btn', type: 'button' }, '↩ Reopen');
+      reopen.addEventListener('click', () => { Store.reopenTrip(t.id); ui.editing = false; ui.donePanel = false; render(); });
+      const exp = el('button', { class: 'mini-btn', type: 'button' }, '⤓ Export');
+      exp.addEventListener('click', () => { const d = Store.exportTrip(t.id); if (d) download(`${Store.slug(t.destination)}.json`, d); });
+      const del = el('button', { class: 'mini-btn danger', type: 'button' }, '🗑 Delete');
+      del.addEventListener('click', () => { if (confirm(`Delete "${t.destination}" from history? This cannot be undone.`)) { Store.removeTrip(t.id); render(); } });
+      acts.appendChild(reopen); acts.appendChild(exp); acts.appendChild(del);
+      card.appendChild(acts);
+      wrap.appendChild(card);
     }
     return wrap;
   }
 
+  // ---------- top-level render ----------
   function render() {
     root.innerHTML = '';
     root.appendChild(renderAppHeader());
 
-    const currentTrips = TRIPS.filter(t => t.status !== 'past');
-    const pastTrips = TRIPS.filter(t => t.status === 'past');
+    const trips = Store.getTrips();
+    const currentId = Store.getCurrentId();
+    const focus = trips.find((t) => t.id === currentId && t.status !== 'past')
+      || trips.find((t) => t.status !== 'past') || null;
+    const pastTrips = trips.filter((t) => t.status === 'past');
 
-    const focus = currentTrips.find(t => t.id === CURRENT_TRIP_ID) || currentTrips[0];
+    if (ui.editing && !isOnline()) {
+      root.appendChild(el('div', { class: 'offline-banner' }, '⚠ You went offline — edits are paused until you reconnect.'));
+    }
+
+    root.appendChild(renderToolbar(focus));
+    if (ui.addPanel) root.appendChild(renderAddPanel());
+
     if (focus) root.appendChild(renderTrip(focus));
-    else root.appendChild(el('div', { class: 'empty' }, 'No active trip — add one to data.js.'));
+    else root.appendChild(el('div', { class: 'empty' }, 'No active trip. Tap “＋ Add trip” to upload one.'));
 
     root.appendChild(renderHistory(pastTrips));
     root.appendChild(el('div', { class: 'offline-tag' }, 'Works offline · saves locally on this device'));
@@ -258,9 +486,10 @@
 
   render();
 
+  window.addEventListener('online', () => render());
+  window.addEventListener('offline', () => render());
+
   if ('serviceWorker' in navigator) {
-    window.addEventListener('load', () => {
-      navigator.serviceWorker.register('./sw.js').catch(() => {});
-    });
+    window.addEventListener('load', () => { navigator.serviceWorker.register('./sw.js').catch(() => {}); });
   }
 })();

@@ -1,9 +1,10 @@
-const CACHE = 'japan-trip-2026-v1';
+const CACHE = 'my-trips-v3';
 const ASSETS = [
   './',
   './index.html',
   './styles.css',
   './data.js',
+  './store.js',
   './app.js',
   './manifest.json',
   './icons/icon.svg',
@@ -13,7 +14,11 @@ const ASSETS = [
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE).then((cache) => cache.addAll(ASSETS)).then(() => self.skipWaiting())
+    caches.open(CACHE)
+      // cache:'reload' bypasses the browser HTTP cache so we never seed the
+      // SW cache with a stale copy of an asset.
+      .then((cache) => cache.addAll(ASSETS.map((u) => new Request(u, { cache: 'reload' }))))
+      .then(() => self.skipWaiting())
   );
 });
 
@@ -25,17 +30,34 @@ self.addEventListener('activate', (event) => {
   );
 });
 
+// Network-first for HTML/JS/CSS/JSON so published updates apply as soon as the
+// device is online; cache is the offline fallback. Images stay cache-first.
 self.addEventListener('fetch', (event) => {
   const req = event.request;
   if (req.method !== 'GET') return;
-  event.respondWith(
-    caches.match(req).then((cached) => {
-      const fetched = fetch(req).then((res) => {
+  const url = new URL(req.url);
+  if (url.origin !== self.location.origin) return;
+
+  const codeLike = req.mode === 'navigate'
+    || url.pathname.endsWith('/')
+    || /\.(html|js|css|json)$/i.test(url.pathname);
+
+  if (codeLike) {
+    event.respondWith(
+      fetch(req).then((res) => {
         const copy = res.clone();
         caches.open(CACHE).then((cache) => cache.put(req, copy)).catch(() => {});
         return res;
-      }).catch(() => cached);
-      return cached || fetched;
-    })
+      }).catch(() => caches.match(req).then((c) => c || caches.match('./index.html')))
+    );
+    return;
+  }
+
+  event.respondWith(
+    caches.match(req).then((cached) => cached || fetch(req).then((res) => {
+      const copy = res.clone();
+      caches.open(CACHE).then((cache) => cache.put(req, copy)).catch(() => {});
+      return res;
+    }))
   );
 });

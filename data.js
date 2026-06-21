@@ -159,3 +159,8 @@ const TRIPS = [{
 }];
 
 const CURRENT_TRIP_ID = 'japan-2026';
+
+// Bump SEED_REV whenever the trip data above is edited and pushed. The app
+// re-seeds an unedited stored trip from data.js when its stored rev is older,
+// so published itinerary updates reach devices that haven't edited in-app.
+const SEED_REV = 2;
