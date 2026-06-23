@@ -23,21 +23,22 @@ const TRIPS = [{
       id: 'd1',
       emoji: '✈️',
       name: 'June 24 — Arrival',
-      dateLabel: 'Wednesday',
+      dateLabel: 'Wednesday · Land KIX 2:35 PM',
       weather: '26°C · Clear morning, drizzle possible evening',
       weatherClass: 'mixed',
       rainPlan: 'If raining — Pontocho Alley is covered (dinner unaffected); Gion stroll fine with a poncho from Daiso; use Nishiki Market arcade instead of the riverbank walk.',
       items: [
-        { id: 'd1i1', time: 'At KIX arrivals hall', label: 'Quick bite at Family Mart or Lawson', note: '2F south end Family Mart / 1F Lawson; onigiri + drink; save appetite for dinner', price: '~¥400–600 for 2', tag: 'food' },
-        { id: 'd1i2', time: 'At KIX JR counter', label: 'Get ICOCA card x2 + load ¥10,000 each', note: 'Load as needed', price: '—', tag: 'transport' },
-        { id: 'd1i3', time: 'At KIX JR counter', label: 'Buy Haruka foreigner tickets x2 (arrival + June 26)', note: 'Show passport, buy both now', price: '¥4,400 for 2', tag: 'transport' },
-        { id: 'd1i4', time: '~2:30 PM', label: 'Haruka Express to Kyoto Station', note: '~75 min, direct', price: 'Included above', tag: 'transport' },
-        { id: 'd1i5', time: '~4:15 PM', label: 'Subway Karasuma Line to Shijo', note: '2 stops, tap ICOCA', price: '¥440 for 2', tag: 'transport' },
-        { id: 'd1i6', time: '~4:30 PM', label: 'Check in to Shijo hotel', note: 'Drop bags, freshen up', price: '—', tag: 'activity' },
-        { id: 'd1i7', time: '~5:30 PM', label: 'Daiso, Shinkyogoku Diamond Building', note: 'Rain ponchos, umbrella, travel essentials, 5 min walk', price: '~¥500–1,000 for 2', tag: 'shopping' },
-        { id: 'd1i8', time: '~6:00 PM', label: 'Early dinner at Pontocho Alley', note: 'Restaurants open 5:30–6 PM, quiet before rush', price: '¥1,600–3,000 for 2', tag: 'food' },
-        { id: 'd1i9', time: '~7:30 PM', label: 'Nishiki Tenmangu Shrine omikuji', note: 'Mechanical English fortune, 2 min from hotel', price: '¥400 for 2', tag: 'activity' },
-        { id: 'd1i10', time: '~8:00 PM', label: 'Gion & Hanamikoji Street stroll', note: 'Most atmospheric after dinner', price: 'Free', tag: 'activity' },
+        { id: 'd1i0', time: '2:35 PM', label: 'Land at KIX (Osaka) — clear immigration + collect bags', note: 'International arrival — allow ~45–60 min for immigration + baggage', price: '—', tag: 'transport' },
+        { id: 'd1i1', time: 'At KIX — arrivals hall (~3:30 PM)', label: 'Quick bite at Family Mart or Lawson', note: '2F south end Family Mart / 1F Lawson; onigiri + drink; save appetite for dinner', price: '~¥400–600 for 2', tag: 'food' },
+        { id: 'd1i2', time: 'At KIX — JR counter (~3:30 PM)', label: 'Get ICOCA card x2 + load ¥10,000 each', note: 'Load as needed', price: '—', tag: 'transport' },
+        { id: 'd1i3', time: 'At KIX — JR counter (~3:35 PM)', label: 'Buy Haruka foreigner tickets x2 (arrival + June 26)', note: 'Show passport, buy both now', price: '¥4,400 for 2', tag: 'transport' },
+        { id: 'd1i4', time: '~4:00 PM', label: 'Haruka Express to Kyoto Station', note: '~75 min, direct; arrives Kyoto ~5:15 PM', price: 'Included above', tag: 'transport' },
+        { id: 'd1i5', time: '~5:25 PM', label: 'Subway Karasuma Line to Shijo', note: '2 stops, tap ICOCA', price: '¥440 for 2', tag: 'transport' },
+        { id: 'd1i6', time: '~5:45 PM', label: 'Check in to Shijo hotel', note: 'Drop bags, freshen up', price: '—', tag: 'activity' },
+        { id: 'd1i7', time: '~6:15 PM', label: 'Daiso, Shinkyogoku Diamond Building', note: 'Rain ponchos, umbrella, travel essentials, 5 min walk', price: '~¥500–1,000 for 2', tag: 'shopping' },
+        { id: 'd1i8', time: '~7:00 PM', label: 'Dinner at Pontocho Alley', note: 'Lantern-lit riverside lane; restaurants open from 5:30–6 PM', price: '¥1,600–3,000 for 2', tag: 'food' },
+        { id: 'd1i9', time: '~8:15 PM', label: 'Nishiki Tenmangu Shrine omikuji', note: 'Mechanical English fortune, 2 min from hotel', price: '¥400 for 2', tag: 'activity' },
+        { id: 'd1i10', time: '~8:45 PM', label: 'Gion & Hanamikoji Street stroll', note: 'Most atmospheric after dinner', price: 'Free', tag: 'activity' },
         { id: 'd1i11', time: 'After', label: 'Kamo Riverbank walk', note: 'Or Nishiki arcade if wet', price: 'Free', tag: 'activity' }
       ]
     },
@@ -163,4 +164,4 @@ const CURRENT_TRIP_ID = 'japan-2026';
 // Bump SEED_REV whenever the trip data above is edited and pushed. The app
 // re-seeds an unedited stored trip from data.js when its stored rev is older,
 // so published itinerary updates reach devices that haven't edited in-app.
-const SEED_REV = 2;
+const SEED_REV = 3;
